@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" name="viewport" content="width=device-width, initial-scale=1">
+    <title>坦克现形</title>
+  </head>
+  <body>
+    <span id="span"></span>
+    <input id="ipt" type="file" accept="image/*" multiple="true" />
+    <div id="displaybox"></div>
+    <script id="worker" type="worker">
+/*
+worker
+隐写位数1-7
+收到对象
+{
+  buffer:ArrayBuffer
+  offset:Number
+  mode:Number
+}
+buffer长度自动补齐为32倍数
+
+*/
+/*
+读取typedarray时可能超出范围
+但位运算时自动转为0
+赋值typedarray时可能超出范围
+但会被自动忽略
+*/
+onmessage=(e)=>{
+  if(e.data.mode==4){
+    const offset=e.data.offset
+    const arr=new Uint8Array(e.data.buffer)
+    const length=Math.ceil((arr.length-offset)/32)*12
+    const result=new Uint8Array(length)
+    let i=0
+    let j=offset-2
+    while(i<length){
+      result[i++]=((arr[j+=2]&15)<<4)|(arr[j+=1]&15)
+      result[i++]=((arr[j+=1]&15)<<4)|(arr[j+=2]&15)
+      result[i++]=((arr[j+=1]&15)<<4)|(arr[j+=1]&15)
+    }
+    postMessage({buffer:result.buffer},[result.buffer])
+    return
+  }else if(e.data.mode==2){
+    const offset=e.data.offset
+    const arr=new Uint8Array(e.data.buffer)
+    const length=Math.ceil((arr.length-offset)/32)*6
+    const result=new Uint8Array(length)
+    let i=0
+    let j=offset-2
+    while(i<length){
+      result[i++]=
+      ((arr[j+=2]&3)<<6)|
+      ((arr[j+=1]&3)<<4)|
+      ((arr[j+=1]&3)<<2)|
+      ( arr[j+=2]&3);
+      result[i++]=
+      ((arr[j+=1]&3)<<6)|
+      ((arr[j+=1]&3)<<4)|
+      ((arr[j+=2]&3)<<2)|
+      ( arr[j+=1]&3);
+      result[i++]=
+      ((arr[j+=1]&3)<<6)|
+      ((arr[j+=2]&3)<<4)|
+      ((arr[j+=1]&3)<<2)|
+      ( arr[j+=1]&3);
+    }
+    postMessage({buffer:result.buffer},[result.buffer])
+    return
+  }else if(e.data.mode==1){
+    const offset=e.data.offset
+    const arr=new Uint8Array(e.data.buffer)
+    const length=Math.ceil((arr.length-offset)/32)*3
+    const result=new Uint8Array(length)
+    let i=0
+    let j=offset-2
+    while(i<length){
+      result[i++]=
+      ((arr[j+=2]&1)<<7)|
+      ((arr[j+=1]&1)<<6)|
+      ((arr[j+=1]&1)<<5)|
+      ((arr[j+=2]&1)<<4)|
+      ((arr[j+=1]&1)<<3)|
+      ((arr[j+=1]&1)<<2)|
+      ((arr[j+=2]&1)<<1)|
+      ( arr[j+=1]&1);
+      result[i++]=
+      ((arr[j+=1]&1)<<7)|
+      ((arr[j+=2]&1)<<6)|
+      ((arr[j+=1]&1)<<5)|
+      ((arr[j+=1]&1)<<4)|
+      ((arr[j+=2]&1)<<3)|
+      ((arr[j+=1]&1)<<2)|
+      ((arr[j+=1]&1)<<1)|
+      ( arr[j+=2]&1);
+      result[i++]=
+      ((arr[j+=1]&1)<<7)|
+      ((arr[j+=1]&1)<<6)|
+      ((arr[j+=2]&1)<<5)|
+      ((arr[j+=1]&1)<<4)|
+      ((arr[j+=1]&1)<<3)|
+      ((arr[j+=2]&1)<<2)|
+      ((arr[j+=1]&1)<<1)|
+      ( arr[j+=1]&1);
+    }
+    postMessage({buffer:result.buffer},[result.buffer])
+    return
+  }else{
+    const mode=e.data.mode
+    const end=(-1)>>>(32-mode)
+    const offset=e.data.offset
+    const arr=new Uint8Array(e.data.buffer)
+    const length=Math.ceil((arr.length-offset)/32)*3*mode
+    const result=new Uint8Array(length)
+    let i=0
+    let j=offset-2
+    let k=0
+    let klength=0
+    while(i<length){
+      klength+=3*mode
+      k=(k<<(mode*3))|
+      ((arr[j+=2]&end)<<(mode*2))|
+      ((arr[j+=1]&end)<<mode)|
+      (arr[j+=1]&end);
+      while(klength>=8){
+        klength+=-8
+        result[i++]=k>>>klength
+        k=(klength==0)?0:((k<<(32-klength))>>>(32-klength))
+      }
+    }
+    postMessage({buffer:result.buffer},[result.buffer])
+    return
+  }
+}
+    </script>
+    <script>
+      const workersrc=URL.createObjectURL(new Blob([document.getElementById("worker").innerHTML],{type:"text/javascript"}))
+      function decode(img,src,func){
+        const cvs=document.createElement("canvas")
+        const ctx=cvs.getContext("2d")
+        cvs.width=img.width
+        cvs.height=img.height
+        ctx.drawImage(img,0,0)
+        const imgarr=ctx.getImageData(0,0,img.width,img.height).data
+        if((imgarr[0]&7)!=0 || (imgarr[1]&7)!=3 || (imgarr[2]&7)==0){
+          func({error:{text:"图片损坏"}})
+          return
+        }
+        const mode=imgarr[2]&7
+        const w=new Worker(src)
+        w.postMessage({offset:4,buffer:imgarr.buffer,mode:mode},[imgarr.buffer])
+        w.onmessage=(e)=>{
+          w.terminate()
+          onend(new Uint8Array(e.data.buffer))
+        }
+        function onend(arr){
+          let i=0
+          while(arr[i]!=0){
+            i++
+          }
+          const meta=Array.from(arr.slice(0,i)).map(x=>String.fromCharCode(x)).join("").split(String.fromCharCode(1))
+          const length=parseInt(meta[0])
+          arr.slice(i+1,i+1+length)
+          const b=new File([arr.slice(i+1,i+1+length).buffer],utf8Decode(meta[1]),{type:meta[2]})
+          func(b)
+        }
+      }
+      function utf8Decode(inputStr) {
+        var outputStr = "";
+        var code1, code2, code3, code4;
+        for (var i = 0; i < inputStr.length; i++) {
+          code1 = inputStr.charCodeAt(i);
+          if (code1 < 128) {
+            outputStr += String.fromCharCode(code1);
+          } else if (code1 < 224) {
+            code2 = inputStr.charCodeAt(++i);
+            outputStr += String.fromCharCode(((code1 & 31) << 6) | (code2 & 63));
+          } else if (code1 < 240) {
+            code2 = inputStr.charCodeAt(++i);
+            code3 = inputStr.charCodeAt(++i);
+            outputStr += String.fromCharCode(((code1 & 15) << 12) | ((code2 & 63) << 6) | (code3 & 63));
+          } else {
+            code2 = inputStr.charCodeAt(++i);
+            code3 = inputStr.charCodeAt(++i);
+            code4 = inputStr.charCodeAt(++i);
+            outputStr += String.fromCharCode(((code1 & 7) << 18) | ((code2 & 63) << 12) | ((code3 & 63) << 6) | (code2 & 63));
+          }
+        }
+        return outputStr;
+      }
+      let srclist=[]
+      let displaybox=document.getElementById("displaybox")
+      let span=document.getElementById("span")
+      const ipt=document.getElementById("ipt")
+      ipt.onchange=()=>{
+        srclist.map(x=>URL.revokeObjectURL(x))
+        srclist=[]
+        displaybox.innerHTML=""
+        const filearray=Array.from(ipt.files)
+        const n=filearray.length
+        let i=0
+        span.innerHTML=i+"/"+n
+        filearray.map(f=>{
+          const div=document.createElement("div")
+          div.innerHTML="正在解析中"
+          div.style.padding="1rem 0"
+          div.style.wordBreak="break-all"
+          displaybox.appendChild(div)
+          const img=new Image()
+          img.src=URL.createObjectURL(f)
+          img.onload=()=>{
+            URL.revokeObjectURL(img.src)
+            decode(img,workersrc,b=>{
+              span.innerHTML=++i+"/"+n
+              if(b.error){
+                div.innerHTML="图片解析失败"
+                return
+              }
+              const src=URL.createObjectURL(b)
+              srclist.push(src)
+              div.innerHTML=""
+              div.appendChild(newdownloadbox(b.name,b.name,src))
+              if(b.type.slice(0,5)=="image"){
+                const imgbox=document.createElement("img")
+                imgbox.src=src
+                imgbox.style.maxWidth="100%"
+                div.appendChild(imgbox)
+              }
+            })
+          }
+        })
+      }
+      function newdownloadbox(text,filename,src){
+        const div=document.createElement("div")
+        const span=document.createElement("span")
+        span.innerText=text
+        span.innerHTML="&emsp;"+span.innerHTML
+        const a=document.createElement("a")
+        a.innerHTML="保存"
+        a.href=src
+        a.download=filename
+        div.appendChild(a)
+        div.appendChild(span)
+        return div
+      }
+    </script>
+  </body>
+</html>
